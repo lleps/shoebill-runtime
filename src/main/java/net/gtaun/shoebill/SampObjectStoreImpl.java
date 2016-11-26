@@ -32,9 +32,12 @@ import net.gtaun.util.event.HandlerPriority;
 
 import java.lang.ref.Reference;
 import java.lang.ref.WeakReference;
+import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.stream.Collectors;
 
 /**
  * @author MK124 & 123marvin123
@@ -92,10 +95,27 @@ public class SampObjectStoreImpl implements SampObjectStore {
     private Map<Integer, Reference<DialogIdImpl>> dialogs = new ConcurrentHashMap<>();
     private List<Reference<PickupImpl>> staticPickups = new ArrayList<>();
 
+    private final Map<Player,Player> playerProxies = new WeakHashMap<>(); // Made Weak to avoid memory leak
+    private final Map<Vehicle,Vehicle> vehicleProxies = new WeakHashMap<>();
+    private final Map<Method,MethodInterceptor<?>> methodInterceptors = new HashMap<>();
 
     SampObjectStoreImpl(EventManager rootEventManager) {
         eventManagerNode = rootEventManager.createChildNode();
         setupObjectEventHandler();
+    }
+
+    @Override
+    public <T> void registerInterceptor(Class<T> clazz,
+                                        String methodName,
+                                        Class<?>[] signature,
+                                        MethodInterceptor<T> interceptor) throws NoSuchMethodException {
+        Method method = clazz.getMethod(methodName, signature);
+
+        if (interceptor != null) {
+            methodInterceptors.put(method, interceptor);
+        } else {
+            methodInterceptors.remove(method);
+        }
     }
 
     private void setupObjectEventHandler() {
@@ -184,7 +204,12 @@ public class SampObjectStoreImpl implements SampObjectStore {
     @Override
     public Player getPlayer(int id) {
         if (id < 0 || id >= MAX_PLAYERS) return null;
-        return players[id];
+        Player player = players[id];
+        if (player == null) {
+            return null;
+        } else {
+            return playerProxies.computeIfAbsent(player, key -> objectProxy(Player.class, player));
+        }
     }
 
     @Override
@@ -194,7 +219,7 @@ public class SampObjectStoreImpl implements SampObjectStore {
 
         for (Player player : players) {
             if (player == null) continue;
-            if (player.getName().equalsIgnoreCase(name)) return player;
+            if (player.getName().equalsIgnoreCase(name)) return getPlayer(player.getId());
         }
 
         return null;
@@ -203,7 +228,25 @@ public class SampObjectStoreImpl implements SampObjectStore {
     @Override
     public Vehicle getVehicle(int id) {
         if (id < 0 || id >= MAX_VEHICLES) return null;
-        return vehicles[id];
+        Vehicle vehicle = vehicles[id];
+        if (vehicle == null) {
+            return null;
+        } else {
+            return vehicleProxies.computeIfAbsent(vehicle, key -> objectProxy(Vehicle.class, vehicle));
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private <T> T objectProxy(Class<T> clazz, T source) {
+        return (T) Proxy.newProxyInstance(Player.class.getClassLoader(),
+                new Class[] { clazz },
+                (proxy, method, args) -> {
+                    MethodInterceptor interceptor = methodInterceptors.get(method);
+                    if (interceptor != null) {
+                        return interceptor.intercept((T) source, method, args);
+                    }
+                    return method.invoke(source, args);
+                });
     }
 
     @Override
@@ -295,7 +338,10 @@ public class SampObjectStoreImpl implements SampObjectStore {
 
     @Override
     public Collection<Player> getPlayers() {
-        return getNotNullInstances(players);
+        return getNotNullInstances(players)
+                .stream()
+                .map(player -> getPlayer(player.getId()))
+                .collect(Collectors.toList());
     }
 
     @Override
@@ -304,7 +350,7 @@ public class SampObjectStoreImpl implements SampObjectStore {
         if (players == null) return list;
 
         for (Player item : players) {
-            if (item != null && !item.isNpc()) list.add(item);
+            if (item != null && !item.isNpc()) list.add(getPlayer(item.getId()));
         }
         return list;
     }
@@ -315,14 +361,17 @@ public class SampObjectStoreImpl implements SampObjectStore {
         if (players == null) return list;
 
         for (Player item : players) {
-            if (item != null && item.isNpc()) list.add(item);
+            if (item != null && item.isNpc()) list.add(getPlayer(item.getId()));
         }
         return list;
     }
 
     @Override
     public Collection<Vehicle> getVehicles() {
-        return getNotNullInstances(vehicles);
+        return getNotNullInstances(vehicles)
+                .stream()
+                .map(vehicle -> getVehicle(vehicle.getId())) // Map to proxy objects.
+                .collect(Collectors.toList());
     }
 
     @Override
