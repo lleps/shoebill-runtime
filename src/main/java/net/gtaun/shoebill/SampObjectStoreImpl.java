@@ -37,7 +37,9 @@ import java.lang.reflect.Proxy;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * @author MK124 & 123marvin123
@@ -338,40 +340,34 @@ public class SampObjectStoreImpl implements SampObjectStore {
 
     @Override
     public Collection<Player> getPlayers() {
-        return getNotNullInstances(players)
-                .stream()
-                .map(player -> getPlayer(player.getId()))
-                .collect(Collectors.toList());
+        return Stream.of(players)
+                .filter(p -> p != null)
+                .map(p -> getPlayer(p.getId()))
+                .collect(Collectors.toCollection((Supplier<Collection<Player>>) LinkedList::new));
     }
 
     @Override
     public Collection<Player> getHumanPlayers() {
-        Collection<Player> list = new ArrayList<>();
-        if (players == null) return list;
-
-        for (Player item : players) {
-            if (item != null && !item.isNpc()) list.add(getPlayer(item.getId()));
-        }
-        return list;
+        return Stream.of(players)
+                .filter(p -> p != null && !p.isNpc())
+                .map(p -> getPlayer(p.getId()))
+                .collect(Collectors.toCollection((Supplier<Collection<Player>>) LinkedList::new));
     }
 
     @Override
     public Collection<Player> getNpcPlayers() {
-        Collection<Player> list = new ArrayList<>();
-        if (players == null) return list;
-
-        for (Player item : players) {
-            if (item != null && item.isNpc()) list.add(getPlayer(item.getId()));
-        }
-        return list;
+        return Stream.of(players)
+                .filter(p -> p != null && p.isNpc())
+                .map(p -> getPlayer(p.getId()))
+                .collect(Collectors.toCollection((Supplier<Collection<Player>>) LinkedList::new));
     }
 
     @Override
     public Collection<Vehicle> getVehicles() {
-        return getNotNullInstances(vehicles)
-                .stream()
-                .map(vehicle -> getVehicle(vehicle.getId())) // Map to proxy objects.
-                .collect(Collectors.toList());
+        return Stream.of(vehicles)
+                .filter(p -> p != null)
+                .map(v -> getVehicle(v.getId()))
+                .collect(Collectors.toCollection((Supplier<Collection<Vehicle>>) LinkedList::new));
     }
 
     @Override
